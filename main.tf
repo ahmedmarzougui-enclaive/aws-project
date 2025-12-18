@@ -1,6 +1,15 @@
 # -------------------------
 # Provider
 # -------------------------
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 6.0.0"
+    }
+  }
+}
+
 provider "aws" {
   region = "eu-north-1"
 }
@@ -38,13 +47,9 @@ resource "aws_subnet" "private_2" {
 }
 
 # -------------------------
-# NAT Gateway (for outbound Internet)
+# NAT Gateway
 # -------------------------
-resource "aws_eip" "nat_eip" {
-  vpc = true
-}
 
-# NAT must be in a subnet that can reach Internet, so we need a temporary public subnet
 resource "aws_subnet" "nat_subnet" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.100.0/24"
@@ -52,10 +57,17 @@ resource "aws_subnet" "nat_subnet" {
   availability_zone       = "eu-north-1a"
 }
 
+# Internet Gateway pour NAT
 resource "aws_internet_gateway" "gw" {
   vpc_id = aws_vpc.main.id
 }
 
+# Elastic IP pour NAT
+resource "aws_eip" "nat_eip" {
+  depends_on = [aws_internet_gateway.gw]
+}
+
+# NAT Gateway
 resource "aws_nat_gateway" "nat" {
   allocation_id = aws_eip.nat_eip.id
   subnet_id     = aws_subnet.nat_subnet.id
@@ -63,7 +75,7 @@ resource "aws_nat_gateway" "nat" {
 }
 
 # -------------------------
-# Private Route Table
+# Route Table privée
 # -------------------------
 resource "aws_route_table" "private_rt" {
   vpc_id = aws_vpc.main.id
@@ -87,17 +99,18 @@ resource "aws_route_table_association" "private_2_assoc" {
 }
 
 # -------------------------
-# Security Groups (private only)
+# Security Group privé
 # -------------------------
 resource "aws_security_group" "private_sg" {
   name   = "private-sg"
   vpc_id = aws_vpc.main.id
 
+  # accès interne seulement
   ingress {
-    from_port       = 3306
-    to_port         = 3306
-    protocol        = "tcp"
-    cidr_blocks     = ["10.0.0.0/16"] # uniquement réseau interne
+    from_port   = 3306
+    to_port     = 3306
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/16"]
   }
 
   egress {
@@ -109,10 +122,10 @@ resource "aws_security_group" "private_sg" {
 }
 
 # -------------------------
-# IAM User for Terraform
+# IAM User pour Terraform
 # -------------------------
 resource "aws_iam_user" "terraform" {
-  name = "terraform-user"
+  name = "terraform-user-1"
 }
 
 resource "aws_iam_access_key" "terraform_key" {
@@ -124,13 +137,3 @@ resource "aws_iam_user_policy_attachment" "terraform_attach" {
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
 
-# -------------------------
-# Outputs
-# -------------------------
-output "terraform_access_key_id" {
-  value = aws_iam_access_key.terraform_key.id
-}
-
-output "terraform_secret_access_key" {
-  value = aws_iam_access_key.terraform_key.secret
-}
